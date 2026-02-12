@@ -1,88 +1,91 @@
-const pool = require('../config/db');
+const { Expense, Category } = require('../models');
 
 // 1. ADD EXPENSE
 exports.addExpense = async (req, res) => {
-    const { title, amount, category, date } = req.body;
     try {
-        const newExpense = await pool.query(
-            'INSERT INTO expenses (user_id, title, amount, category, date) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [req.user, title, amount, category, date || new Date()]
-        );
-        res.status(201).json(newExpense.rows[0]);
+        const { title, amount, category_id, date, description } = req.body;
+        // req.user.id comes from your Auth Middleware (we'll add that next)
+        const newExpense = await Expense.create({
+            title,
+            amount,
+            category_id,
+            user_id: req.user.id, 
+            date: date || new Date(),
+            description
+        });
+        res.status(201).json(newExpense);
     } catch (err) {
-        res.status(500).json({ error: "Error saving expense" });
+        res.status(500).json({ error: "Error saving expense", message: err.message });
     }
 };
 
-// 2. GET ALL (With Smart Filters)
+// 2. GET ALL (With Category Filter)
 exports.getExpenses = async (req, res) => {
     try {
-        const { category } = req.query;
-        let query = 'SELECT * FROM expenses WHERE user_id = $1';
-        let params = [req.user];
+        const { category_id } = req.query;
+        let whereClause = { user_id: req.user.id };
 
-        if (category) {
-            query += ' AND category = $2';
-            params.push(category);
+        if (category_id) {
+            whereClause.category_id = category_id;
         }
 
-        query += ' ORDER BY date DESC';
-        const result = await pool.query(query, params);
-        res.json(result.rows);
+        const expenses = await Expense.findAll({
+            where: whereClause,
+            include: [Category], // This joins the category name/icon automatically!
+            order: [['date', 'DESC']]
+        });
+        res.json(expenses);
     } catch (err) {
         res.status(500).json({ error: "Error fetching expenses" });
     }
 };
 
-// 3. GET STATS
+// 3. GET STATS (Group by Category)
 exports.getStats = async (req, res) => {
     try {
-        const stats = await pool.query(
-            'SELECT category, SUM(amount) as total FROM expenses WHERE user_id = $1 GROUP BY category',
-            [req.user]
-        );
-        const total = await pool.query('SELECT SUM(amount) as total FROM expenses WHERE user_id = $1', [req.user]);
-        
-        res.json({
-            overallTotal: total.rows[0].total || 0,
-            byCategory: stats.rows
+        const expenses = await Expense.findAll({
+            where: { user_id: req.user.id },
+            include: [Category]
         });
+
+        // Simple math to group totals
+        const byCategory = {};
+        let overallTotal = 0;
+
+        expenses.forEach(exp => {
+            const catName = exp.Category ? exp.Category.name : 'Uncategorized';
+            byCategory[catName] = (byCategory[catName] || 0) + parseFloat(exp.amount);
+            overallTotal += parseFloat(exp.amount);
+        });
+
+        res.json({ overallTotal, byCategory });
     } catch (err) {
         res.status(500).json({ error: "Error calculating stats" });
     }
 };
 
-// 4. GET SINGLE
-exports.getExpenseById = async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM expenses WHERE id = $1 AND user_id = $2', [req.params.id, req.user]);
-        if (result.rows.length === 0) return res.status(404).json({ error: "Not found" });
-        res.json(result.rows[0]);
-    } catch (err) {
-        res.status(500).json({ error: "Server error" });
-    }
-};
-
-// 5. UPDATE (The "Edit" Feature)
+// 4. UPDATE
 exports.updateExpense = async (req, res) => {
-    const { title, amount, category, date } = req.body;
     try {
-        const result = await pool.query(
-            'UPDATE expenses SET title=$1, amount=$2, category=$3, date=$4 WHERE id=$5 AND user_id=$6 RETURNING *',
-            [title, amount, category, date, req.params.id, req.user]
-        );
-        if (result.rows.length === 0) return res.status(404).json({ error: "Not found" });
-        res.json(result.rows[0]);
+        const { title, amount, category_id, date } = req.body;
+        const expense = await Expense.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+        
+        if (!expense) return res.status(404).json({ error: "Not found" });
+
+        await expense.update({ title, amount, category_id, date });
+        res.json(expense);
     } catch (err) {
         res.status(500).json({ error: "Update failed" });
     }
 };
 
-// 6. DELETE
+// 5. DELETE
 exports.deleteExpense = async (req, res) => {
     try {
-        const result = await pool.query('DELETE FROM expenses WHERE id = $1 AND user_id = $2 RETURNING *', [req.params.id, req.user]);
-        if (result.rows.length === 0) return res.status(404).json({ error: "Not found" });
+        const deleted = await Expense.destroy({
+            where: { id: req.params.id, user_id: req.user.id }
+        });
+        if (!deleted) return res.status(404).json({ error: "Not found" });
         res.json({ message: "Deleted successfully" });
     } catch (err) {
         res.status(500).json({ error: "Delete failed" });

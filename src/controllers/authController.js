@@ -1,98 +1,44 @@
-const pool = require("../config/db");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+const { User } = require('../models');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
-// 1. REGISTER FUNCTION
 exports.register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { username, email, password } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "Please fill all fields" });
-    }
+    // 1. Check if user already exists
+    const existingUser = await User.findOne({ where: { email } });
+    if (existingUser) return res.status(400).json({ message: "Email already in use" });
 
-    const userCheck = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-    if (userCheck.rows.length > 0) {
-      return res.status(400).json({ message: "User already exists" });
-    }
+    // 2. Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    // 3. Create user
+    const user = await User.create({ username, email, password: hashedPassword });
 
-    const newUser = await pool.query(
-      "INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email",
-      [name, email, hashedPassword]
-    );
-
-    res.status(201).json({
-      message: "User registered successfully ✅",
-      user: newUser.rows[0]
-    });
-
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ message: "Server error" });
+    res.status(201).json({ message: "User registered successfully!", user: { id: user.id, email: user.email } });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-// 2. LOGIN FUNCTION
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const userResult = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-    if (userResult.rows.length === 0) {
-      return res.status(400).json({ message: "Invalid Credentials" });
-    }
+    // 1. Find user
+    const user = await User.findOne({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    const user = userResult.rows[0];
-
+    // 2. Compare password
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid Credentials" });
-    }
+    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
-    const token = jwt.sign(
-      { id: user.id },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
+    // 3. Generate JWT Token
+    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1d' });
 
-    res.json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email }
-    });
-
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ message: "Server error" });
+    res.json({ message: "Login successful", token, user: { id: user.id, username: user.username } });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
   }
-};
-
-// 3. GET CURRENT USER DATA (The one that was causing the crash)
-exports.getMe = async (req, res) => {
-    try {
-        const user = await pool.query(
-            'SELECT id, name, email FROM users WHERE id = $1', 
-            [req.user]
-        );
-
-        if (user.rows.length === 0) {
-            return res.status(404).json({ error: "User not found" });
-        }
-
-        res.json(user.rows[0]); 
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: "Server error while fetching user data" });
-    }
-};
-exports.updateBudget = async (req, res) => {
-    try {
-        const { budget } = req.body;
-        await pool.query('UPDATE users SET monthly_budget = $1 WHERE id = $2', [budget, req.user]);
-        res.json({ message: "Budget updated successfully!" });
-    } catch (err) {
-        res.status(500).json({ error: "Server error" });
-    }
 };
