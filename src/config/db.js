@@ -1,3 +1,4 @@
+// src/config/db.js
 const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
@@ -9,8 +10,13 @@ const sequelize = new Sequelize(
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     dialect: 'postgres',
-    logging: false
-    // ❌ MA-DIRISH dialectOptions HNA ❌
+    logging: false,
+    dialectOptions: {
+      ssl: process.env.NODE_ENV === 'production' ? { // Ghadi y-khdem SSL ghir melli n-kono f Cloud
+        require: true,
+        rejectUnauthorized: false
+      } : false
+    }
   }
 );
 
