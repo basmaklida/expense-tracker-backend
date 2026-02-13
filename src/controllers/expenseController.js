@@ -4,7 +4,6 @@ const { Expense, Category } = require('../models');
 exports.addExpense = async (req, res) => {
     try {
         const { title, amount, category_id, date, description } = req.body;
-        // req.user.id comes from your Auth Middleware (we'll add that next)
         const newExpense = await Expense.create({
             title,
             amount,
@@ -19,19 +18,16 @@ exports.addExpense = async (req, res) => {
     }
 };
 
-// 2. GET ALL (With Category Filter)
+// 2. GET ALL
 exports.getExpenses = async (req, res) => {
     try {
         const { category_id } = req.query;
         let whereClause = { user_id: req.user.id };
-
-        if (category_id) {
-            whereClause.category_id = category_id;
-        }
+        if (category_id) whereClause.category_id = category_id;
 
         const expenses = await Expense.findAll({
             where: whereClause,
-            include: [Category], // This joins the category name/icon automatically!
+            include: [Category],
             order: [['date', 'DESC']]
         });
         res.json(expenses);
@@ -40,36 +36,45 @@ exports.getExpenses = async (req, res) => {
     }
 };
 
-// 3. GET STATS (Group by Category)
+// 3. GET STATS
 exports.getStats = async (req, res) => {
     try {
         const expenses = await Expense.findAll({
             where: { user_id: req.user.id },
             include: [Category]
         });
-
-        // Simple math to group totals
         const byCategory = {};
         let overallTotal = 0;
-
         expenses.forEach(exp => {
             const catName = exp.Category ? exp.Category.name : 'Uncategorized';
             byCategory[catName] = (byCategory[catName] || 0) + parseFloat(exp.amount);
             overallTotal += parseFloat(exp.amount);
         });
-
         res.json({ overallTotal, byCategory });
     } catch (err) {
         res.status(500).json({ error: "Error calculating stats" });
     }
 };
 
-// 4. UPDATE
+// 🌟 4. GET BY ID (Hadi hiya li kant naqsak o khellat l-app t-crash!)
+exports.getExpenseById = async (req, res) => {
+    try {
+        const expense = await Expense.findOne({
+            where: { id: req.params.id, user_id: req.user.id },
+            include: [Category]
+        });
+        if (!expense) return res.status(404).json({ error: "Expense not found" });
+        res.json(expense);
+    } catch (err) {
+        res.status(500).json({ error: "Error fetching expense" });
+    }
+};
+
+// 5. UPDATE
 exports.updateExpense = async (req, res) => {
     try {
         const { title, amount, category_id, date } = req.body;
         const expense = await Expense.findOne({ where: { id: req.params.id, user_id: req.user.id } });
-        
         if (!expense) return res.status(404).json({ error: "Not found" });
 
         await expense.update({ title, amount, category_id, date });
@@ -79,7 +84,7 @@ exports.updateExpense = async (req, res) => {
     }
 };
 
-// 5. DELETE
+// 6. DELETE
 exports.deleteExpense = async (req, res) => {
     try {
         const deleted = await Expense.destroy({
