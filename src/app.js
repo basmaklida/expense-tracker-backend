@@ -18,5 +18,6 @@ app.use('/api/expenses', expenseRoutes);
 app.get('/', (req, res) => {
     res.send("Backend is running successfully!");
 });
-
+const categoryRoutes = require('./src/routes/categoryRoutes');
+app.use('/api/categories', categoryRoutes);
 module.exports = app;
